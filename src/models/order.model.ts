@@ -1,161 +1,341 @@
-import mongoose, { Document } from "mongoose";
+import mongoose, { Document } from 'mongoose';
 
 const orderItemSchema = new mongoose.Schema({
   productId: {
-    type: mongoose.Types.ObjectId,
+    type: String,
     required: true,
   },
-  name: { 
-    type: String, 
-    required: true 
+  productCode: {
+    type: String,
+    required: true,
   },
-  price: { 
-    type: Number, 
-    required: true 
-  }, 
-  quantity: { 
-    type: Number, 
-    required: true 
+  name: {
+    type: String,
+    required: true,
+    trim: true,
   },
-  size: { 
-    type: String, 
-    required: true 
+  price: {
+    type: Number,
+    required: true,
+    min: 0,
+  },
+  quantity: {
+    type: Number,
+    required: true,
+    min: 1,
+  },
+  size: {
+    type: String,
+    required: true,
   },
   color: {
-    colorName: { 
-      type: String, 
-      required: true 
+    colorName: {
+      type: String,
+      required: true,
     },
-    colorHex: { 
-      type: String, 
-      required: true 
+    colorHex: {
+      type: String,
+      required: true,
     },
   },
-  selectedImage: { 
-    type: String, 
-    required: true 
+  selectedImage: {
+    type: String,
+    required: true,
   },
-  hsn: { 
-    type: String
+  hsn: {
+    type: String,
+    trim: true,
   },
-  gstRate: { 
-    type: Number, 
-    default: 5
+  gstRate: {
+    type: Number,
+    default: 0,
   },
 });
 
 const addressSchema = new mongoose.Schema({
-  name: String,
-  phone: String,
-  email: String,
-  addressLine1: String,
-  addressLine2: String,
-  city: String,
-  state: String,
-  pincode: String,
-  country: { type: String, default: "India" },
-});
-
-const paymentSchema = new mongoose.Schema({
-  provider: {
+  name: {
     type: String,
-    enum: ["shiprocket"],
     required: true,
+    trim: true,
   },
-  method: {
+  phone: {
     type: String,
-    enum: ["upi", "card", "netbanking", "cod"],
+    required: true,
+    trim: true,
   },
-  status: {
+  email: {
     type: String,
-    enum: ["pending", "paid", "failed", "refunded"],
-    default: "pending",
+    trim: true,
   },
-  transactionId: String,
-  amount: Number,
-  paidAt: Date,
-  raw: mongoose.Schema.Types.Mixed,
-});
-
-const shipmentSchema = new mongoose.Schema({
-  provider: { type: String, default: "shiprocket" },
-  shipmentId: Number,
-  awb: String,
-  courierName: String,
-  status: {
+  addressLine1: {
     type: String,
-    enum: [
-      "pending",
-      "pickup_scheduled",
-      "in_transit",
-      "delivered",
-      "rto",
-      "cancelled",
-    ],
+    required: true,
+    trim: true,
   },
-  trackingUrl: String,
-  estimatedDelivery: Date,
-  raw: mongoose.Schema.Types.Mixed,
+  addressLine2: {
+    type: String,
+    trim: true,
+  },
+  city: {
+    type: String,
+    required: true,
+    trim: true,
+  },
+  state: {
+    type: String,
+    required: true,
+    trim: true,
+  },
+  pincode: {
+    type: String,
+    required: true,
+    trim: true,
+  },
+  country: {
+    type: String,
+    default: 'India',
+    trim: true,
+  },
 });
 
 const orderSchema = new mongoose.Schema(
   {
     orderNumber: {
       type: String,
+      required: true,
       unique: true,
+      uppercase: true,
+      trim: true,
       index: true,
     },
     userId: {
-      type: mongoose.Types.ObjectId,
+      type: String,
       required: false,
+      index: true,
     },
     sessionId: {
       type: String,
+      required: false,
       index: true,
     },
     isGuestOrder: {
       type: Boolean,
       default: false,
     },
-    items: [orderItemSchema],
-    subtotal: Number,
-    discountAmount: Number,
-    shippingAmount: Number,
-    totalAmount: Number,
+    items: {
+      type: [orderItemSchema],
+      required: true,
+      validate: {
+        validator: (v: any[]) => v && v.length > 0,
+        message: 'Order must have at least one item',
+      },
+    },
+    subtotal: {
+      type: Number,
+      required: true,
+      min: 0,
+    },
+    discountAmount: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    shippingAmount: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    gstAmount: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    totalAmount: {
+      type: Number,
+      required: true,
+      min: 0,
+    },
     appliedCoupon: {
-      code: String,
-      discountAmount: Number,
+      code: {
+        type: String,
+        trim: true,
+      },
+      discountId: {
+        type: String,
+      },
+      discountAmount: {
+        type: Number,
+        min: 0,
+      },
     },
     appliedVoucher: {
-      code: String,
-      discountAmount: Number,
+      code: {
+        type: String,
+        trim: true,
+      },
+      discountId: {
+        type: String,
+      },
+      discountAmount: {
+        type: Number,
+        min: 0,
+      },
     },
-    shippingAddress: addressSchema,
-    billingAddress: addressSchema,
-    payment: paymentSchema,
-    shipment: shipmentSchema,
+    shippingAddress: {
+      type: addressSchema,
+      required: true,
+    },
+    billingAddress: {
+      type: addressSchema,
+      required: true,
+    },
+    paymentId: {
+      type: String,
+      index: true,
+    },
+    shipmentId: {
+      type: String,
+      index: true,
+    },
     status: {
       type: String,
       enum: [
-        "created",
-        "payment_pending",
-        "confirmed",
-        "shipped",
-        "delivered",
-        "cancelled",
-        "refunded",
+        'created',
+        'payment_pending',
+        'payment_processing',
+        'payment_failed',
+        'confirmed',
+        'processing',
+        'shipped',
+        'delivered',
+        'cancelled',
+        'refund_initiated',
+        'refunded',
+        'failed',
       ],
-      default: "created",
+      default: 'created',
+      index: true,
+    },
+    paymentStatus: {
+      type: String,
+      enum: ['pending', 'processing', 'completed', 'failed', 'refunded'],
+      default: 'pending',
+    },
+    shipmentStatus: {
+      type: String,
+      enum: [
+        'not_created',
+        'pending',
+        'pickup_scheduled',
+        'in_transit',
+        'out_for_delivery',
+        'delivered',
+        'rto_initiated',
+        'rto_in_transit',
+        'rto_delivered',
+        'cancelled',
+        'failed',
+      ],
+      default: 'not_created',
+    },
+    notes: {
+      type: String,
+      trim: true,
+      maxLength: 500,
+    },
+    customerNotes: {
+      type: String,
+      trim: true,
+      maxLength: 500,
     },
     source: {
       type: String,
-      enum: ["web", "mobile"],
-      default: "web",
+      enum: ['web', 'mobile', 'admin'],
+      default: 'web',
+    },
+    cancelledAt: {
+      type: Date,
+    },
+    cancelledBy: {
+      type: String,
+    },
+    cancellationReason: {
+      type: String,
+      trim: true,
+      maxLength: 500,
     },
   },
   { timestamps: true }
 );
 
-export interface IOrder extends Document {}
+orderSchema.index({ userId: 1, status: 1 });
+orderSchema.index({ sessionId: 1, status: 1 });
+orderSchema.index({ createdAt: -1 });
+orderSchema.index({ orderNumber: 1, userId: 1 });
 
-export default mongoose.model<IOrder>("Order", orderSchema);
+export interface IOrderItem {
+  productId: string;
+  productCode: string;
+  name: string;
+  price: number;
+  quantity: number;
+  size: string;
+  color: {
+    colorName: string;
+    colorHex: string;
+  };
+  selectedImage: string;
+  hsn?: string;
+  gstRate: number;
+}
+
+export interface IOrderAddress {
+  name: string;
+  phone: string;
+  email?: string;
+  addressLine1: string;
+  addressLine2?: string;
+  city: string;
+  state: string;
+  pincode: string;
+  country: string;
+}
+
+export interface IAppliedDiscount {
+  code: string;
+  discountId: string;
+  discountAmount: number;
+}
+
+export interface IOrder extends Document {
+  _id: string;
+  orderNumber: string;
+  userId?: string;
+  sessionId?: string;
+  isGuestOrder: boolean;
+  items: IOrderItem[];
+  subtotal: number;
+  discountAmount: number;
+  shippingAmount: number;
+  gstAmount: number;
+  totalAmount: number;
+  appliedCoupon?: IAppliedDiscount;
+  appliedVoucher?: IAppliedDiscount;
+  shippingAddress: IOrderAddress;
+  billingAddress: IOrderAddress;
+  paymentId?: string;
+  shipmentId?: string;
+  status: string;
+  paymentStatus: string;
+  shipmentStatus: string;
+  notes?: string;
+  customerNotes?: string;
+  source: string;
+  cancelledAt?: Date;
+  cancelledBy?: string;
+  cancellationReason?: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export default mongoose.model<IOrder>('Order', orderSchema);

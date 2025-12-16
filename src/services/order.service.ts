@@ -1,216 +1,274 @@
-import { OrderRepository } from "../repository/order.repository";
-import cartService from "./cart.service";
-import shiprocketService from "./shiprocket.service";
-import { nanoid } from "nanoid";
+import { OrderRepository } from '../repository/order.repository';
+import productModel from '../models/product.model';
+import cartModel from '../models/cart.model';
+import { NotFoundError } from '../errors/not-found.error';
+import { BadRequestError } from '../errors/bad-request.error';
+import { IOrderAddress, IOrderItem } from '../models/order.model';
+import { nanoid } from 'nanoid';
 
 class OrderService {
   constructor(private readonly _orderRepo: OrderRepository) {}
 
+  private generateOrderNumber(): string {
+    const timestamp = Date.now();
+    const random = nanoid(8).toUpperCase();
+    return `ORD-${timestamp}-${random}`;
+  }
+
+  private async validateCartItems(cartItems: any[]) {
+    const validatedItems: IOrderItem[] = [];
+
+    for (const item of cartItems) {
+      // Fetch product details
+      const product = await productModel.findById(item.product);
+      if (!product) {
+        throw new NotFoundError(`Product ${item.product} not found`);
+      }
+
+      if (!product.isActive) {
+        throw new BadRequestError(`Product ${product.name} is no longer available`);
+      }
+
+      // Find the specific color
+      const productColor = product.colors.find(
+        (c) => c.colorName === item.color.colorName
+      );
+      if (!productColor) {
+        throw new BadRequestError(
+          `Color ${item.color.colorName} not available for ${product.name}`
+        );
+      }
+
+      // Find the specific size stock
+      const sizeStock = productColor.sizeStock.find((s) => s.size === item.size);
+      if (!sizeStock) {
+        throw new BadRequestError(
+          `Size ${item.size} not available for ${product.name} in ${item.color.colorName}`
+        );
+      }
+
+      // Check stock availability
+      if (sizeStock.stock < item.quantity) {
+        throw new BadRequestError(
+          `Insufficient stock for ${product.name} - ${item.color.colorName} - ${item.size}. Available: ${sizeStock.stock}`
+        );
+      }
+
+      validatedItems.push({
+        productId: product._id,
+        productCode: product.productCode,
+        name: product.name,
+        price: product.price,
+        quantity: item.quantity,
+        size: item.size,
+        color: {
+          colorName: item.color.colorName,
+          colorHex: item.color.colorHex,
+        },
+        selectedImage: item.selectedImage,
+        hsn: product.hsn,
+        gstRate: 0, // Configure GST rate as needed
+      });
+    }
+
+    return validatedItems;
+  }
+
+  private calculateOrderTotals(params: {
+    items: IOrderItem[];
+    appliedCoupon?: { discountAmount: number };
+    appliedVoucher?: { discountAmount: number };
+    shippingAmount?: number;
+  }) {
+    const subtotal = params.items.reduce(
+      (sum, item) => sum + item.price * item.quantity,
+      0
+    );
+
+    const couponDiscount = params.appliedCoupon?.discountAmount || 0;
+    const voucherDiscount = params.appliedVoucher?.discountAmount || 0;
+    const discountAmount = couponDiscount + voucherDiscount;
+
+    const shippingAmount = params.shippingAmount || 0;
+
+    // Calculate GST (if applicable)
+    const gstAmount = params.items.reduce(
+      (sum, item) => sum + (item.price * item.quantity * item.gstRate) / 100,
+      0
+    );
+
+    const totalAmount = subtotal - discountAmount + shippingAmount + gstAmount;
+
+    return {
+      subtotal,
+      discountAmount,
+      shippingAmount,
+      gstAmount,
+      totalAmount: Math.max(totalAmount, 0),
+    };
+  }
+
   async createOrderFromCart(params: {
     userId?: string;
     sessionId?: string;
-    shippingAddress: any;
-    billingAddress?: any;
-    paymentMethod: "prepaid" | "cod";
+    shippingAddress: IOrderAddress;
+    billingAddress?: IOrderAddress;
+    customerNotes?: string;
+    source?: string;
   }) {
-    const cart = params.userId
-      ? await cartService.getCart(params.userId)
-      : await cartService.getGuestCart(params.sessionId!);
+    // Fetch cart
+    const cart = await cartModel.findOne(
+      params.userId
+        ? { user: params.userId, isActive: true }
+        : { sessionId: params.sessionId, isActive: true }
+    );
 
     if (!cart || !cart.items.length) {
-      throw new Error("Cart is empty");
+      throw new BadRequestError('Cart is empty');
     }
 
-    const totals = await cartService.calculateCartTotal(cart);
+    // Validate cart items and get product details
+    const validatedItems = await this.validateCartItems(cart.items);
 
+    // Calculate totals
+    const totals = this.calculateOrderTotals({
+      items: validatedItems,
+      appliedCoupon: cart.appliedCoupon,
+      appliedVoucher: cart.appliedVoucher,
+    });
+
+    // Create order
     const order = await this._orderRepo.createOrder({
-      orderNumber: `ORD-${Date.now()}-${nanoid(6)}`,
+      orderNumber: this.generateOrderNumber(),
       userId: params.userId,
       sessionId: params.sessionId,
       isGuestOrder: !params.userId,
-
-      items: cart.items.map((i: any) => ({
-        productId: i.product,
-        name: i.name,
-        price: i.price,
-        quantity: i.quantity,
-        size: i.size,
-        color: i.color,
-        selectedImage: i.selectedImage,
-        hsn: i.hsn,
-      })),
-
+      items: validatedItems,
       subtotal: totals.subtotal,
       discountAmount: totals.discountAmount,
-      shippingAmount: 0,
-      totalAmount: totals.total,
-
+      shippingAmount: totals.shippingAmount,
+      gstAmount: totals.gstAmount,
+      totalAmount: totals.totalAmount,
+      appliedCoupon: cart.appliedCoupon ? {
+        code: cart.appliedCoupon.code,
+        discountId: cart.appliedCoupon.discountId.toString(),
+        discountAmount: cart.appliedCoupon.discountAmount,
+      } : undefined,
+      appliedVoucher: cart.appliedVoucher ? {
+        code: cart.appliedVoucher.code,
+        discountId: cart.appliedVoucher.discountId.toString(),
+        discountAmount: cart.appliedVoucher.discountAmount,
+      } : undefined,
       shippingAddress: params.shippingAddress,
       billingAddress: params.billingAddress || params.shippingAddress,
-
-      payment: {
-        provider: "shiprocket",
-        status: "pending",
-        method: params.paymentMethod === "cod" ? "cod" : undefined,
-      },
-
-      status: "payment_pending",
+      customerNotes: params.customerNotes,
+      source: params.source || 'web',
     });
+
+    // Deactivate cart after order creation
+    await cartModel.findByIdAndUpdate(cart._id, { isActive: false });
 
     return order;
   }
 
-  async initiateShiprocketCheckout(order: any) {
-    const checkoutPayload = {
-      order_id: order.orderNumber,
-      amount: order.totalAmount,
-      customer: order.shippingAddress,
-    };
-
-    const response = await shiprocketService.createCheckout(checkoutPayload);
-
-    return response.data;
-  }
-
-  async handlePaymentSuccess(orderId: string, paymentPayload: any) {
-    const order = await this._orderRepo.updatePayment(orderId, {
-      ...paymentPayload,
-      status: "paid",
-      paidAt: new Date(),
-    });
-
-    await this._orderRepo.updateStatus(orderId, "confirmed");
-
-    return this.createShipment(order);
-  }
-
-  async handleShiprocketPaymentSuccess(payload: any) {
-    const {
-      order_id,
-      transaction_id,
-      amount,
-      payment_method,
-      raw_response,
-    } = payload;
-
-    const order = await this._orderRepo.getOrderByOrderNumber(order_id);
-    if (!order) throw new Error("Order not found");
-
-    // Idempotency check
-    if ((order as any).payment?.status === "paid") return;
-
-    await this._orderRepo.updatePayment(order._id, {
-      provider: "shiprocket",
-      status: "paid",
-      transactionId: transaction_id,
-      method: payment_method,
-      amount,
-      paidAt: new Date(),
-      raw: raw_response,
-    });
-
-    await this._orderRepo.updateStatus(order._id, "confirmed");
-
-    // AUTO CREATE SHIPMENT
-    await this.createShipment(order);
-  }
-
-  // ===============================
-  // PAYMENT FAILURE
-  // ===============================
-  async handleShiprocketPaymentFailure(payload: any) {
-    const { order_id, transaction_id, raw_response } = payload;
-
-    const order = await this._orderRepo.getOrderByOrderNumber(order_id);
-    if (!order) return;
-
-    await this._orderRepo.updatePayment(order._id, {
-      provider: "shiprocket",
-      status: "failed",
-      transactionId: transaction_id,
-      raw: raw_response,
-    });
-
-    await this._orderRepo.updateStatus(order._id, "payment_pending");
-  }
-
-  // ===============================
-  // SHIPMENT UPDATES
-  // ===============================
-  async handleShipmentUpdate(payload: any) {
-    const {
-      order_id,
-      shipment_id,
-      awb,
-      courier_name,
-      status,
-      tracking_url,
-      estimated_delivery,
-      raw_response,
-    } = payload;
-
-    const order = await this._orderRepo.getOrderByOrderNumber(order_id);
-    if (!order) return;
-
-    await this._orderRepo.updateShipment(order._id, {
-      shipmentId: shipment_id,
-      awb,
-      courierName: courier_name,
-      status,
-      trackingUrl: tracking_url,
-      estimatedDelivery: estimated_delivery,
-      raw: raw_response,
-    });
-
-    // Sync order status
-    if (status === "delivered") {
-      await this._orderRepo.updateStatus(order._id, "delivered");
-    }
-    if (status === "cancelled" || status === "rto_initiated") {
-      await this._orderRepo.updateStatus(order._id, "cancelled");
-    }
-  }
-
-  // ===============================
-  // SHIPMENT CREATION
-  // ===============================
-  async createShipment(order: any) {
-    if (order.shipment?.shipmentId) return; // idempotent
-
-    const payload = {
-      order_id: order.orderNumber,
-      billing_customer_name: order.shippingAddress.name,
-      billing_phone: order.shippingAddress.phone,
-      billing_address: order.shippingAddress.addressLine1,
-      billing_city: order.shippingAddress.city,
-      billing_state: order.shippingAddress.state,
-      billing_pincode: order.shippingAddress.pincode,
-
-      order_items: order.items.map((i: any) => ({
-        name: i.name,
-        sku: i.productId.toString(),
-        units: i.quantity,
-        selling_price: i.price,
-      })),
-    };
-
-    const res = await shiprocketService.createShipment(payload);
-
-    await this._orderRepo.updateShipment(order._id, {
-      shipmentId: res.data.shipment_id,
-      awb: res.data.awb_code,
-      courierName: res.data.courier_name,
-      status: "pickup_scheduled",
-      raw: res.data,
-    });
-  }
-
   async getOrderById(orderId: string) {
-    return this._orderRepo.getOrderById(orderId);
+    const order = await this._orderRepo.getOrderById(orderId);
+    if (!order) {
+      throw new NotFoundError('Order not found');
+    }
+    return order;
   }
 
-  async getOrdersByUser(userId: string) {
-    return this._orderRepo.getOrdersByUser(userId);
+  async getOrderByOrderNumber(orderNumber: string) {
+    const order = await this._orderRepo.getOrderByOrderNumber(orderNumber);
+    if (!order) {
+      throw new NotFoundError('Order not found');
+    }
+    return order;
+  }
+
+  async getUserOrders(userId: string, limit?: number) {
+    return this._orderRepo.getOrdersByUserId(userId, limit);
+  }
+
+  async getGuestOrders(sessionId: string, limit?: number) {
+    return this._orderRepo.getOrdersBySessionId(sessionId, limit);
+  }
+
+  async updateOrderStatus(params: {
+    orderId: string;
+    status: string;
+    paymentStatus?: string;
+    shipmentStatus?: string;
+  }) {
+    const order = await this._orderRepo.updateOrderStatus(params);
+    if (!order) {
+      throw new NotFoundError('Order not found');
+    }
+    return order;
+  }
+
+  async cancelOrder(params: {
+    orderId: string;
+    cancelledBy: string;
+    cancellationReason?: string;
+  }) {
+    const order = await this._orderRepo.getOrderById(params.orderId);
+    if (!order) {
+      throw new NotFoundError('Order not found');
+    }
+
+    // Check if order can be cancelled
+    const cancellableStatuses = [
+      'created',
+      'payment_pending',
+      'payment_failed',
+      'confirmed',
+    ];
+    if (!cancellableStatuses.includes(order.status)) {
+      throw new BadRequestError(
+        `Order cannot be cancelled in ${order.status} status`
+      );
+    }
+
+    // Update product stock back
+    for (const item of order.items) {
+      const product = await productModel.findById(item.productId);
+      if (product) {
+        const color = product.colors.find(
+          (c) => c.colorName === item.color.colorName
+        );
+        if (color) {
+          const sizeStock = color.sizeStock.find((s) => s.size === item.size);
+          if (sizeStock) {
+            sizeStock.stock += item.quantity;
+            await product.save();
+          }
+        }
+      }
+    }
+
+    return this._orderRepo.cancelOrder(
+      params.orderId,
+      params.cancelledBy,
+      params.cancellationReason
+    );
+  }
+
+  async getOrdersByStatus(status: string, limit?: number, skip?: number) {
+    return this._orderRepo.getOrdersByStatus(status, limit, skip);
+  }
+
+  async getRecentOrders(limit: number = 10) {
+    return this._orderRepo.getRecentOrders(limit);
+  }
+
+  async linkPaymentToOrder(orderId: string, paymentId: string) {
+    return this._orderRepo.updateOrderPaymentId(orderId, paymentId);
+  }
+
+  async linkShipmentToOrder(orderId: string, shipmentId: string) {
+    return this._orderRepo.updateOrderShipmentId(orderId, shipmentId);
   }
 }
 

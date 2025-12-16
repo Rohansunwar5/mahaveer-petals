@@ -1,426 +1,301 @@
-import config from "../config";
-import { BadRequestError } from "../errors/bad-request.error";
-import { InternalServerError } from "../errors/internal-server.error";
-import { NotFoundError } from "../errors/not-found.error";
-import { IOrderStatus } from "../models/order.model";
-import { IPaymentMethod, IPaymentStatus } from "../models/payment.model";
-
-import { OrderRepository } from "../repository/order.repository";
-import { PaymentRepository } from "../repository/payment.repository";
-import { UserRepository } from "../repository/user.repository";
-
-import mailService from "./mail.service";
-import orderService from "./order.service";
-import productService from "./product.service";
-import razorpayService from "./razorpay.service";
-import shiprocketService from "./shiprocket.service";
-
-export interface InitiatePaymentParams {
-  orderId: string;
-  user?: string; 
-  guestEmail?: string;
-  method: IPaymentMethod;
-  notes?: any;
-}
-
-export interface RefundPaymentParams {
-  paymentId: string;
-  amount: number;
-  reason?: string;
-  razorpayRefundId?: string;
-}
-
-export interface ProcessRefundParams {
-  paymentId: string;
-  refundId: string;
-  status: "pending" | "processed" | "failed";
-  razorpayRefundId?: string;
-}
+import { PaymentRepository } from '../repository/payment.repository';
+import { OrderRepository } from '../repository/order.repository';
+import shiprocketService from './shiprocket.service';
+import { NotFoundError } from '../errors/not-found.error';
+import { BadRequestError } from '../errors/bad-request.error';
+import { InternalServerError } from '../errors/internal-server.error';
 
 class PaymentService {
   constructor(
-    private readonly _paymentRepository: PaymentRepository,
-    private readonly _userRepository: UserRepository,
-    private readonly _orderRepository: OrderRepository
+    private readonly _paymentRepo: PaymentRepository,
+    private readonly _orderRepo: OrderRepository
   ) {}
 
-  // ---------------------------------------------------------------------
-  // INITIATE PAYMENT
-  // ---------------------------------------------------------------------
-  async initiatePayment(params: InitiatePaymentParams) {
-    const { orderId, user, guestEmail, method, notes } = params;
-
-    const order = await orderService.getOrderById(orderId);
-    if (!order) throw new NotFoundError("Order not found");
-
-    if (user && (!order.user || order.user.toString() !== user)) {
-      throw new BadRequestError("Order does not belong to user");
-    }
-    if (guestEmail && order.guestInfo?.email !== guestEmail) {
-      throw new BadRequestError("Order does not belong to this email");
-    }
-
-    const existingPayment = await this._paymentRepository.getPaymentByOrderId(orderId);
-    if (existingPayment) {
-      throw new BadRequestError("Payment already initiated");
-    }
-
-    // -------------------------
-    // COD ORDER
-    // -------------------------
-    if (method === IPaymentMethod.COD) {
-      const payment = await this._paymentRepository.createPayment({
-        orderId,
-        orderNumber: order.orderNumber,
-        user: order.user?.toString(),
-        guestInfo: order.guestInfo,
-        amount: order.total,
-        currency: "INR",
-        method: IPaymentMethod.COD,
-        notes,
-      });
-
-      await this._paymentRepository.markPaymentAsCaptured(payment._id.toString());
-
-      await this._orderRepository.updateOrder(orderId, {
-        paymentStatus: IPaymentStatus.CAPTURED,
-      });
-
-      await orderService.updateOrderStatus(orderId, IOrderStatus.PROCESSING);
-
-      return { payment };
-    }
-
-    // -------------------------
-    // ONLINE PAYMENT (RAZORPAY)
-    // -------------------------
-    const amountInPaise = Math.round(order.total * 100);
-
-    const razorpayOrder = await razorpayService.createOrder(
-      orderId,
-      amountInPaise,
-      "INR",
-      {
-        ...notes,
-        orderId,
-        userId: user || order.user?.toString(),
-        guestEmail: guestEmail || order.guestInfo?.email,
-        orderNumber: order.orderNumber,
-      }
-    );
-
-    const payment = await this._paymentRepository.createPayment({
-      orderId,
-      orderNumber: order.orderNumber,
-      user: order.user?.toString(),
-      guestInfo: order.guestInfo,
-      amount: order.total,
-      currency: "INR",
-      method: IPaymentMethod.RAZORPAY,
-      receipt: razorpayOrder.receipt,
-      notes: { ...notes, razorpayOrder },
-    });
-
-    await this._paymentRepository.updatePayment(payment._id.toString(), {
-      razorpayOrderId: razorpayOrder.id,
-    });
-
-    return {
-      payment,
-      order: razorpayOrder,
-      key: config.RAZORPAY_KEY_ID,
-    };
-  }
-
-  // ---------------------------------------------------------------------
-  // PAYMENT SUCCESS HANDLER
-  // ---------------------------------------------------------------------
-  // ---------------------------------------------------------------------
-// PAYMENT SUCCESS HANDLER (EMAIL IS NOW NON-BLOCKING)
-// ---------------------------------------------------------------------
-async handleSuccessfulPayment(
-  razorpayOrderId: string,
-  razorpayPaymentId: string,
-  razorpaySignature: string
-) {
-  const payment = await this._paymentRepository.getPaymentByRazorpayOrderId(
-    razorpayOrderId
-  );
-  if (!payment) throw new NotFoundError("Payment not found");
-
-  const isValidSignature = await razorpayService.verifyPaymentSignature(
-    razorpayOrderId,
-    razorpayPaymentId,
-    razorpaySignature
-  );
-  if (!isValidSignature) throw new BadRequestError("Invalid payment signature");
-
-  const razorpayPayment = await razorpayService.fetchPayment(razorpayPaymentId);
-  if (razorpayPayment.status !== "captured") {
-    throw new BadRequestError(`Payment not captured. Status: ${razorpayPayment.status}`);
-  }
-
-  await this._paymentRepository.markPaymentAsCaptured(
-    payment._id.toString(),
-    razorpayPaymentId,
-    { razorpayPayment }
-  );
-
-  await this._orderRepository.updateOrder(payment.orderId.toString(), {
-    paymentStatus: IPaymentStatus.CAPTURED,
-  });
-
-  const orderDetails = await this._orderRepository.getOrderById(
-    payment.orderId.toString()
-  );
-  if (!orderDetails) throw new InternalServerError("Order not found");
-
-  let userEmail = null;
-
-  if (orderDetails.user) {
-    const u = await this._userRepository.getUserById(orderDetails.user.toString());
-    userEmail = u?.email;
-  } else {
-    userEmail = orderDetails.guestInfo?.email;
-  }
-
-  if (!userEmail) throw new InternalServerError("No customer email found");
-
-  if (orderDetails.status === IOrderStatus.PENDING) {
-    await orderService.updateOrderStatus(
-      payment.orderId.toString(),
-      IOrderStatus.PROCESSING
-    );
-  }
-
-  console.log("🚀 Processing successful payment for order:", orderDetails.orderNumber);
-  console.log("📦 Creating Shiprocket shipment…");
-
-  // --------------------------------------------------------------------
-  // SHIPROCKET (Blocking + Critical)
-  // --------------------------------------------------------------------
-  try {
-    const shiprocketResponse = await shiprocketService.createShipment(
-      orderDetails,
-      userEmail
-    );
-
-    await this._orderRepository.updateOrder(orderDetails._id, {
-      shipmentId: shiprocketResponse.shipment_id?.toString(),
-      awbNumber: shiprocketResponse.awb_code,
-      courierName: shiprocketResponse.courier_name,
-      trackingUrl: `https://shiprocket.co/tracking/${shiprocketResponse.awb_code}`,
-    });
-
-    console.log("✅ Shiprocket shipment created:", shiprocketResponse);
-  } catch (err: any) {
-    console.error("❌ Shiprocket failed:", err.message);
-    await this._orderRepository.updateOrder(orderDetails._id, {
-      notes: `Shiprocket failed: ${err.message}`,
-    });
-  }
-
-  // --------------------------------------------------------------------
-  // SEND EMAIL (NON-BLOCKING, DOES NOT INTERRUPT ANYTHING)
-  // --------------------------------------------------------------------
-  mailService
-    .sendEmail(
-      userEmail,
-      "order-confirmation-email.ejs",
-      {
-        firstName: orderDetails.guestInfo?.firstName,
-        lastName: orderDetails.guestInfo?.lastName,
-        email: userEmail,
-        orderNumber: orderDetails.orderNumber,
-        orderDate: new Date(orderDetails.createdAt).toLocaleDateString("en-IN", {
-          year: "numeric",
-          month: "long",
-          day: "numeric",
-        }),
-        items: orderDetails.items,
-        pricing: {
-          subtotal: orderDetails.subtotal,
-          totalDiscountAmount: orderDetails.totalDiscountAmount || 0,
-          shippingCharge: orderDetails.shippingCharge,
-          taxAmount: orderDetails.taxAmount,
-          total: orderDetails.total,
-        },
-      },
-      `Order Confirmation - ${orderDetails.orderNumber}`
-    )
-    .then(() => console.log("📧 Email sent successfully"))
-    .catch((err) => {
-      console.error("❌ Email sending failed (non-blocking):", err.message);
-    });
-
-  // Return immediately — email continues in background
-  return payment;
-}
-
-
-  // ---------------------------------------------------------------------
-  // FAILED PAYMENT
-  // ---------------------------------------------------------------------
-  async handleFailedPayment(
-    razorpayOrderId: string,
-    razorpayPaymentId: string
-  ) {
-    const payment = await this._paymentRepository.getPaymentByRazorpayOrderId(
-      razorpayOrderId
-    );
-    if (!payment) throw new NotFoundError("Payment not found");
-
-    await this._paymentRepository.markPaymentAsFailed(payment._id.toString());
-
-    await this._orderRepository.updateOrder(payment.orderId.toString(), {
-      status: IOrderStatus.FAILED,
-    });
-
-    await orderService.updateOrderStatus(
-      payment.orderId.toString(),
-      IOrderStatus.FAILED
-    );
-
-    return true;
-  }
-
-  // ---------------------------------------------------------------------
-  // VERIFY PAYMENT API
-  // ---------------------------------------------------------------------
-  async verifyPayment(
-    razorpayOrderId: string,
-    razorpayPaymentId: string,
-    razorpaySignature: string
-  ) {
-    return this.handleSuccessfulPayment(
-      razorpayOrderId,
-      razorpayPaymentId,
-      razorpaySignature
-    );
-  }
-
-  // ---------------------------------------------------------------------
-  // GET PAYMENT DETAILS
-  // ---------------------------------------------------------------------
-  async getPaymentDetails(paymentId: string, userId?: string, guestEmail?: string) {
-    const payment = await this._paymentRepository.getPaymentById(paymentId);
-    if (!payment) throw new NotFoundError("Payment not found");
-
-    if (userId && payment.user?.toString() !== userId) {
-      throw new BadRequestError("Unauthorized payment access");
-    }
-    if (guestEmail && payment.guestInfo?.email !== guestEmail) {
-      throw new BadRequestError("Unauthorized payment access");
-    }
-
-    return payment;
-  }
-
-  // ---------------------------------------------------------------------
-  // GET PAYMENT BY ORDER ID
-  // ---------------------------------------------------------------------
-  async getPaymentByOrderId(orderId: string, userId?: string, guestEmail?: string) {
-    const payment = await this._paymentRepository.getPaymentByOrderId(orderId);
-    if (!payment) throw new NotFoundError("Payment not found");
-
-    if (userId && payment.user?.toString() !== userId) {
-      throw new BadRequestError("Unauthorized access");
-    }
-    if (guestEmail && payment.guestInfo?.email !== guestEmail) {
-      throw new BadRequestError("Unauthorized access");
-    }
-
-    return payment;
-  }
-
-  // ---------------------------------------------------------------------
-  // GET PAYMENT BY ORDER NUMBER
-  // ---------------------------------------------------------------------
-  async getPaymentByOrderNumber(orderNumber: string, userId?: string, guestEmail?: string) {
-    const payment = await this._paymentRepository.getPaymentByOrderNumber(orderNumber);
-    if (!payment) throw new NotFoundError("Payment not found");
-
-    if (userId && payment.user?.toString() !== userId) {
-      throw new BadRequestError("Unauthorized access");
-    }
-    if (guestEmail && payment.guestInfo?.email !== guestEmail) {
-      throw new BadRequestError("Unauthorized access");
-    }
-
-    return payment;
-  }
-
-  // ---------------------------------------------------------------------
-  // PAYMENT HISTORY (USER)
-  // ---------------------------------------------------------------------
-  async getPaymentHistory(userId: string, page: number, limit: number) {
-    return this._paymentRepository.getPaymentsByUser(userId, page, limit);
-  }
-
-  // ---------------------------------------------------------------------
-  // PAYMENT HISTORY (GUEST)
-  // ---------------------------------------------------------------------
-  async getGuestPaymentHistory(email: string, page: number, limit: number) {
-    return this._paymentRepository.getPaymentsByGuestEmail(email, page, limit);
-  }
-
-  // ---------------------------------------------------------------------
-  // INITIATE REFUND
-  // ---------------------------------------------------------------------
-  async initiateRefund(params: RefundPaymentParams) {
-    const payment = await this._paymentRepository.getPaymentById(params.paymentId);
-    if (!payment) throw new NotFoundError("Payment not found");
-
-    return this._paymentRepository.addRefund({
-      paymentId: params.paymentId,
+  async createPayment(params: {
+    orderId: string;
+    orderNumber: string;
+    userId?: string;
+    sessionId?: string;
+    provider: string;
+    amount: number;
+    method?: string;
+  }) {
+    const payment = await this._paymentRepo.createPayment({
+      orderId: params.orderId,
+      orderNumber: params.orderNumber,
+      userId: params.userId,
+      sessionId: params.sessionId,
+      provider: params.provider,
       amount: params.amount,
-      reason: params.reason,
-      razorpayRefundId: params.razorpayRefundId,
+      method: params.method,
     });
+
+    // Link payment to order
+    await this._orderRepo.updateOrderPaymentId(params.orderId, payment._id);
+
+    return payment;
   }
 
-  // ---------------------------------------------------------------------
-  // PROCESS REFUND
-  // ---------------------------------------------------------------------
-  async processRefund(params: ProcessRefundParams) {
-    return this._paymentRepository.updateRefundStatus({
-      paymentId: params.paymentId,
-      refundId: params.refundId,
-      status: params.status,
-      processedAt: new Date(),
+  async initiateShiprocketCheckout(params: {
+    orderId: string;
+    shippingAddress: {
+      name: string;
+      email: string;
+      phone: string;
+      addressLine1: string;
+      city: string;
+      state: string;
+      pincode: string;
+      country: string;
+    };
+  }) {
+    const order = await this._orderRepo.getOrderById(params.orderId);
+    if (!order) {
+      throw new NotFoundError('Order not found');
+    }
+
+    // Check if payment already exists for this order
+    let payment = await this._paymentRepo.getPaymentByOrderId(params.orderId);
+
+    if (!payment) {
+      // Create payment record
+      payment = await this.createPayment({
+        orderId: order._id,
+        orderNumber: order.orderNumber,
+        userId: order.userId,
+        sessionId: order.sessionId,
+        provider: 'shiprocket',
+        amount: order.totalAmount,
+      });
+    }
+
+    // Check if checkout already created
+    if (payment.shiprocketCheckoutId && payment.checkoutUrl) {
+      return {
+        paymentId: payment._id,
+        checkoutUrl: payment.checkoutUrl,
+        shiprocketCheckoutId: payment.shiprocketCheckoutId,
+      };
+    }
+
+    try {
+      // Create Shiprocket Quick Checkout
+      const checkoutResponse = await shiprocketService.createQuickCheckout({
+        order_id: order.orderNumber,
+        order_amount: order.totalAmount,
+        customer_name: params.shippingAddress.name,
+        customer_email: params.shippingAddress.email,
+        customer_phone: params.shippingAddress.phone,
+        billing_address: params.shippingAddress.addressLine1,
+        billing_city: params.shippingAddress.city,
+        billing_state: params.shippingAddress.state,
+        billing_pincode: params.shippingAddress.pincode,
+        billing_country: params.shippingAddress.country,
+        payment_method: 'prepaid',
+      });
+
+      // Update payment with checkout details
+      await this._paymentRepo.updatePaymentCheckoutDetails(
+        payment._id,
+        checkoutResponse.checkout_id,
+        checkoutResponse.order_id,
+        checkoutResponse.checkout_url,
+        checkoutResponse
+      );
+
+      // Update order status
+      await this._orderRepo.updateOrderStatus({
+        orderId: order._id,
+        status: 'payment_pending',
+        paymentStatus: 'pending',
+      });
+
+      return {
+        paymentId: payment._id,
+        checkoutUrl: checkoutResponse.checkout_url,
+        shiprocketCheckoutId: checkoutResponse.checkout_id,
+      };
+    } catch (error: any) {
+      console.error('Shiprocket checkout initiation error:', error);
+      throw new InternalServerError('Failed to initiate payment checkout');
+    }
+  }
+
+  async handlePaymentSuccess(params: {
+    checkoutId?: string;
+    transactionId: string;
+    gatewayTransactionId?: string;
+    orderNumber?: string;
+    method?: string;
+    amount?: number;
+    webhookData?: any;
+  }) {
+    let payment;
+
+    if (params.checkoutId) {
+      payment = await this._paymentRepo.getPaymentByCheckoutId(params.checkoutId);
+    } else if (params.orderNumber) {
+      const order = await this._orderRepo.getOrderByOrderNumber(params.orderNumber);
+      if (order) {
+        payment = await this._paymentRepo.getPaymentByOrderId(order._id);
+      }
+    } else if (params.transactionId) {
+      payment = await this._paymentRepo.getPaymentByTransactionId(params.transactionId);
+    }
+
+    if (!payment) {
+      throw new NotFoundError('Payment not found');
+    }
+
+    // Idempotency check - if already completed, return
+    if (payment.status === 'completed') {
+      return payment;
+    }
+
+    // Mark payment as completed
+    const updatedPayment = await this._paymentRepo.markPaymentCompleted(
+      payment._id,
+      params.transactionId,
+      params.gatewayTransactionId,
+      params.method,
+      params.webhookData
+    );
+
+    // Update order status
+    await this._orderRepo.updateOrderStatus({
+      orderId: payment.orderId,
+      status: 'confirmed',
+      paymentStatus: 'completed',
     });
+
+    return updatedPayment;
   }
 
-  // ---------------------------------------------------------------------
-  // PAYMENT STATISTICS
-  // ---------------------------------------------------------------------
-  async getPaymentStats(userId?: string, guestEmail?: string) {
-    return this._paymentRepository.getPaymentStats(userId, guestEmail);
+  async handlePaymentFailure(params: {
+    checkoutId?: string;
+    transactionId?: string;
+    orderNumber?: string;
+    errorCode?: string;
+    errorMessage?: string;
+    failureReason?: string;
+    webhookData?: any;
+  }) {
+    let payment;
+
+    if (params.checkoutId) {
+      payment = await this._paymentRepo.getPaymentByCheckoutId(params.checkoutId);
+    } else if (params.orderNumber) {
+      const order = await this._orderRepo.getOrderByOrderNumber(params.orderNumber);
+      if (order) {
+        payment = await this._paymentRepo.getPaymentByOrderId(order._id);
+      }
+    } else if (params.transactionId) {
+      payment = await this._paymentRepo.getPaymentByTransactionId(params.transactionId);
+    }
+
+    if (!payment) {
+      throw new NotFoundError('Payment not found');
+    }
+
+    // Mark payment as failed
+    const updatedPayment = await this._paymentRepo.markPaymentFailed(
+      payment._id,
+      params.errorCode,
+      params.errorMessage,
+      params.failureReason,
+      params.webhookData
+    );
+
+    // Update order status
+    await this._orderRepo.updateOrderStatus({
+      orderId: payment.orderId,
+      status: 'payment_failed',
+      paymentStatus: 'failed',
+    });
+
+    return updatedPayment;
   }
 
-  async getPaymentsByMethod(method: IPaymentMethod, page: number, limit: number) {
-    return this._paymentRepository.getPaymentsByMethod(method, page, limit);
+  async getPaymentById(paymentId: string) {
+    const payment = await this._paymentRepo.getPaymentById(paymentId);
+    if (!payment) {
+      throw new NotFoundError('Payment not found');
+    }
+    return payment;
   }
 
-  async getPaymentsByStatus(status: IPaymentStatus, page: number, limit: number) {
-    return this._paymentRepository.getPaymentsByStatus(status, page, limit);
+  async getPaymentByOrderId(orderId: string) {
+    const payment = await this._paymentRepo.getPaymentByOrderId(orderId);
+    if (!payment) {
+      throw new NotFoundError('Payment not found for this order');
+    }
+    return payment;
   }
 
-  async getPaymentsByDateRange(start: Date, end: Date, page: number, limit: number) {
-    return this._paymentRepository.getPaymentsByDateRange(start, end, page, limit);
+  async initiateRefund(params: {
+    paymentId: string;
+    refundAmount: number;
+    refundTransactionId?: string;
+  }) {
+    const payment = await this._paymentRepo.getPaymentById(params.paymentId);
+    if (!payment) {
+      throw new NotFoundError('Payment not found');
+    }
+
+    if (payment.status !== 'completed') {
+      throw new BadRequestError('Can only refund completed payments');
+    }
+
+    if (params.refundAmount > payment.amount) {
+      throw new BadRequestError('Refund amount cannot exceed payment amount');
+    }
+
+    // Initiate refund
+    const updatedPayment = await this._paymentRepo.initiateRefund(
+      payment._id,
+      params.refundAmount,
+      params.refundTransactionId
+    );
+
+    // Update order status
+    await this._orderRepo.updateOrderStatus({
+      orderId: payment.orderId,
+      status: 'refunded',
+      paymentStatus: 'refunded',
+    });
+
+    return updatedPayment;
   }
 
-  async getPaymentMethodStats(userId?: string, guestEmail?: string) {
-    return this._paymentRepository.getPaymentsByMethodStats(userId, guestEmail);
-  }
+  async retryPayment(orderId: string) {
+    const payment = await this._paymentRepo.getPaymentByOrderId(orderId);
+    if (!payment) {
+      throw new NotFoundError('Payment not found');
+    }
 
-  async getRefundStats(userId?: string, guestEmail?: string) {
-    return this._paymentRepository.getRefundStats(userId, guestEmail);
+    if (payment.status === 'completed') {
+      throw new BadRequestError('Payment already completed');
+    }
+
+    // Reset payment status to pending
+    await this._paymentRepo.updatePaymentStatus({
+      paymentId: payment._id,
+      status: 'pending',
+    });
+
+    // Return existing checkout URL if available
+    if (payment.checkoutUrl) {
+      return {
+        checkoutUrl: payment.checkoutUrl,
+        paymentId: payment._id,
+      };
+    }
+
+    throw new BadRequestError('No checkout URL available for retry');
   }
 }
 
 export default new PaymentService(
   new PaymentRepository(),
-  new UserRepository(),
   new OrderRepository()
 );

@@ -1,50 +1,42 @@
-import mongoose from "mongoose";
-
-export enum IPaymentStatus {
-  CREATED = "created",
-  CAPTURED = "captured",
-  FAILED = "failed",
-  REFUNDED = "refunded",
-  PARTIAL_REFUNDED = "partial_refunded",
-}
-
-export enum IPaymentMethod {
-  RAZORPAY = "razorpay",
-  COD = "cod",
-  WALLET = "wallet",
-}
+import mongoose, { Document } from 'mongoose';
 
 const paymentSchema = new mongoose.Schema(
   {
     orderId: {
-      type: mongoose.Types.ObjectId,
+      type: String,
       required: true,
+      index: true,
     },
     orderNumber: {
       type: String,
       required: true,
+      index: true,
     },
-    razorpayOrderId: {
+    userId: {
       type: String,
-      unique: true,
-      sparse: true,
+      index: true,
     },
-    razorpayPaymentId: {
+    sessionId: {
       type: String,
-      unique: true,
-      sparse: true,
+      index: true,
     },
-    user: {
-      type: mongoose.Types.ObjectId,
+    provider: {
+      type: String,
+      enum: ['shiprocket', 'razorpay', 'cod'],
+      default: 'shiprocket',
+      required: true,
+    },
+    method: {
+      type: String,
+      enum: ['upi', 'card', 'netbanking', 'wallet', 'cod', 'emi'],
       required: false,
     },
-    guestInfo: {
-      firstName: { type: String },
-      lastName: { type: String },
-      email: { type: String },
-      phone: { type: String },
+    status: {
+      type: String,
+      enum: ['pending', 'processing', 'completed', 'failed', 'refunded', 'cancelled'],
+      default: 'pending',
+      index: true,
     },
-
     amount: {
       type: Number,
       required: true,
@@ -52,122 +44,103 @@ const paymentSchema = new mongoose.Schema(
     },
     currency: {
       type: String,
-      default: "INR",
-      required: true,
+      default: 'INR',
+      uppercase: true,
     },
-    method: {
+    shiprocketCheckoutId: {
       type: String,
-      enum: IPaymentMethod,
-      required: true,
+      index: true,
     },
-    status: {
+    shiprocketOrderId: {
       type: String,
-      enum: IPaymentStatus,
-      default: IPaymentStatus.CREATED,
+      index: true,
     },
-    receipt: {
+    transactionId: {
+      type: String,
+      index: true,
+    },
+    gatewayTransactionId: {
+      type: String,
+      index: true,
+    },
+    checkoutUrl: {
       type: String,
     },
-    notes: {
-      type: Object,
+    shiprocketResponse: {
+      type: mongoose.Schema.Types.Mixed,
     },
-    refunds: [
-      {
-        amount: {
-          type: Number,
-          required: true,
-          min: 0,
-        },
-        razorpayRefundId: {
-          type: String,
-          sparse: true,
-        },
-        reason: {
-          type: String,
-          maxLength: 500,
-        },
-        status: {
-          type: String,
-          enum: ["pending", "processed", "failed"],
-          default: "pending",
-        },
-        processedAt: Date,
-        createdAt: {
-          type: Date,
-          default: Date.now,
-        },
-      },
-    ],
+    webhookData: {
+      type: mongoose.Schema.Types.Mixed,
+    },
+    errorCode: {
+      type: String,
+    },
+    errorMessage: {
+      type: String,
+      trim: true,
+    },
     failureReason: {
       type: String,
-      maxLength: 500,
+      trim: true,
     },
-    gatewayResponse: {
-      type: Object,
+    paidAt: {
+      type: Date,
     },
-    capturedAt: Date,
-    failedAt: Date,
-    refundedAt: Date,
+    refundedAt: {
+      type: Date,
+    },
+    refundAmount: {
+      type: Number,
+      min: 0,
+    },
+    refundTransactionId: {
+      type: String,
+    },
+    retryCount: {
+      type: Number,
+      default: 0,
+    },
+    metadata: {
+      type: mongoose.Schema.Types.Mixed,
+    },
   },
   { timestamps: true }
 );
 
 paymentSchema.index({ orderId: 1, status: 1 });
-paymentSchema.index({ user: 1, status: 1 });
-paymentSchema.index({ orderNumber: 1 });
-paymentSchema.index({ razorpayOrderId: 1 });
-paymentSchema.index({ razorpayPaymentId: 1 });
+paymentSchema.index({ shiprocketCheckoutId: 1 });
+paymentSchema.index({ transactionId: 1 });
 paymentSchema.index({ createdAt: -1 });
-paymentSchema.index({ "guestInfo.email": 1, status: 1 });
 
-// Add validation to ensure either user OR guestInfo.email exists
-paymentSchema.pre("save", function (next) {
-  // @ts-ignore - this is a Mongoose document
-  if (!this.user && !this.guestInfo?.email) {
-    return next(new Error("Either user or guestInfo.email is required"));
-  }
-  next();
-});
-
-export interface IPaymentRefund {
-  amount: number;
-  razorpayRefundId?: string;
-  reason?: string;
-  status: "pending" | "processed" | "failed";
-  processedAt?: Date;
-  createdAt: Date;
-}
-
-export interface IPayment extends mongoose.Document {
+export interface IPayment extends Document {
   _id: string;
-  orderId: mongoose.Types.ObjectId;
+  orderId: string;
   orderNumber: string;
-  razorpayOrderId?: string;
-  razorpayPaymentId?: string;
-  user?: mongoose.Types.ObjectId;
-  guestInfo?: {
-    firstName: string;
-    lastName?: string;
-    email: string;
-    phone?: string;
-  };
+  userId?: string;
+  sessionId?: string;
+  provider: string;
+  method?: string;
+  status: string;
   amount: number;
   currency: string;
-  method: IPaymentMethod;
-  status: IPaymentStatus;
-  receipt?: string;
-  notes?: any;
-  refunds?: IPaymentRefund[];
+  shiprocketCheckoutId?: string;
+  shiprocketOrderId?: string;
+  transactionId?: string;
+  gatewayTransactionId?: string;
+  checkoutUrl?: string;
+  shiprocketResponse?: any;
+  webhookData?: any;
+  errorCode?: string;
+  errorMessage?: string;
   failureReason?: string;
-  gatewayResponse?: any;
-  capturedAt?: Date;
-  failedAt?: Date;
+  paidAt?: Date;
   refundedAt?: Date;
+  refundAmount?: number;
+  refundTransactionId?: string;
+  retryCount: number;
+  metadata?: any;
   createdAt: Date;
   updatedAt: Date;
-  // Virtuals
-  totalRefundedAmount: number;
-  isFullyRefunded: boolean;
 }
 
-export default mongoose.model<IPayment>("Payment", paymentSchema);
+export default mongoose.model<IPayment>('Payment', paymentSchema);

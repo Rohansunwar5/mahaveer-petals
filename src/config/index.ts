@@ -24,6 +24,14 @@ const config = {
   CLOUDINARY_CLOUD_NAME: process.env.CLOUDINARY_CLOUD_NAME! as string,
   CLOUDINARY_API_KEY: process.env.CLOUDINARY_API_KEY! as string,
   CLOUDINARY_API_SECRET: process.env.CLOUDINARY_API_SECRET! as string,
+  SHIPROCKET_BASE_URL : process.env.SHIPROCKET_BASE_URL ! as string,
+  SHIPROCKET_PASSWORD: process.env.SHIPROCKET_PASSWORD! as string,
+  SHIPROCKET_EMAIL: process.env.SHIPROCKET_EMAIL! as string,
+  FRONTEND_URL: process.env.FRONTEND_URL! as string,
+  BACKEND_URL: process.env.BACKEND_URL! as string,
+  SHIPROCKET_PICKUP_LOCATION: process.env.SHIPROCKET_PICKUP_LOCATION! as string,
+  SHIPROCKET_PICKUP_PINCODE: process.env.SHIPROCKET_PICKUP_PINCODE! as string,
+  SHIPROCKET_WEBHOOK_SECRET: process.env.SHIPROCKET_WEBHOOK_SECRET! as string,
 
 
   SERVER_NAME: `${process.env.SERVER_NAME}-${process.env.NODE_ENV}`! as string,

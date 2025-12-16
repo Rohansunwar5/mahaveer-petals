@@ -1,10 +1,9 @@
-import { Router } from "express";
-import { shiprocketWebhook } from "../controllers/shiprocket.webhook.controller";
-import { asyncHandler } from "../utils/asynchandler";
+import { Router } from 'express';
+import { handleShiprocketWebhook } from '../controllers/shiprocket.webhook.controller';
 
-const webhook = Router();
+const webhookRouter = Router();
 
-// NO auth middleware
-webhook.post("/shiprocket", asyncHandler(shiprocketWebhook));
+// Shiprocket webhook endpoint
+webhookRouter.post('/shiprocket', handleShiprocketWebhook);
 
-export default webhook;
+export default webhookRouter;
