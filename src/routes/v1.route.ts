@@ -23,7 +23,7 @@ v1Router.use('/admin', adminRouter);
 v1Router.use('/auth', authRouter);
 v1Router.use('/product', productRouter);
 v1Router.use('/cart', cartRouter);
-// v1Router.use('/order', orderRouter);
+v1Router.use('/order', orderRouter);
 v1Router.use('/category', categoryRouter);
 v1Router.use('/sub-category', subcategoryRouter);
 // v1Router.use('/payments', paymentRouter);
