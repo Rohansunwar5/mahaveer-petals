@@ -1,4 +1,4 @@
-import userModel, { IAuthProvider, IUser } from '../models/user.model';
+import userModel, { IUser } from '../models/user.model';
 
 export interface IOnBoardUserParams {
   firstName: string;
@@ -25,7 +25,8 @@ export class UserRepository {
     email: params.email,
     phone: params.phone || '',
     password: params.password,
-    authProvider: params.authProvider || IAuthProvider.EMAIL,
+    // authProvider: params.authProvider || IAuthProvider.EMAIL,
+    authProvider: params.authProvider,
     verified: params.verified || false,
     img: params.img
   });
