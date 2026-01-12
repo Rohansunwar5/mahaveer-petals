@@ -3,6 +3,7 @@ import mongoose from 'mongoose';
 
 export interface ICreateCategoryParams {
   name: string;
+  handle: string;
   description?: string;
   image?: string;
   shiprocketCollectionId?: string;
@@ -13,6 +14,7 @@ export interface ICreateCategoryParams {
 export interface IUpdateCategoryParams {
   _id: string;
   name?: string;
+  handle?: string;
   description?: string;
   image?: string;
   shiprocketCollectionId?: string;
@@ -33,6 +35,7 @@ export class CategoryRepository {
   async createCategory(params: ICreateCategoryParams): Promise<ICategory> {
     return this._model.create({
       name: params.name,
+      handle: params.handle,
       description: params.description || '',
       image: params.image || '',
       shiprocketCollectionId: params.shiprocketCollectionId,
@@ -47,6 +50,10 @@ export class CategoryRepository {
 
   async getCategoryByName(name: string): Promise<ICategory | null> {
     return this._model.findOne({ name: { $regex: new RegExp(`^${name}$`, 'i') } });
+  }
+  
+  async getCategoryByHandle(handle: string): Promise<ICategory | null> {
+    return this._model.findOne({ handle: handle.toLowerCase() });
   }
 
   async getCategories(params: IGetCategoriesParams) {
@@ -91,6 +98,7 @@ export class CategoryRepository {
     const updateObject: any = {};
 
     if (updateData.name) updateObject.name = updateData.name;
+    if (updateData.handle) updateObject.handle = updateData.handle;
     if (updateData.description !== undefined) updateObject.description = updateData.description;
     if (updateData.image !== undefined) updateObject.image = updateData.image;
     if (updateData.shiprocketCollectionId !== undefined) updateObject.shiprocketCollectionId = updateData.shiprocketCollectionId;

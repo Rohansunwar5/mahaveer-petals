@@ -53,6 +53,7 @@ class ProductVariantService {
 
     // Sync product metrics after creating variant
     await productService.syncProductMetrics(params.productId);
+    productService.sendProductWebhookAsync(params.productId);
 
     return variant;
   }
@@ -98,8 +99,9 @@ class ProductVariantService {
       throw new NotFoundError('Variant not found');
     }
 
-    // Sync product metrics after updating variant
     await productService.syncProductMetrics(variant.productId.toString());
+    productService.sendProductWebhookAsync(variant.productId.toString());
+
 
     return variant;
   }
@@ -119,6 +121,8 @@ class ProductVariantService {
     // Sync product total stock after updating variant stock
     if (updatedVariant) {
       await productService.syncProductMetrics(updatedVariant.productId.toString());
+      productService.sendProductWebhookAsync(updatedVariant.productId.toString());
+
     }
 
     return updatedVariant;
@@ -132,6 +136,8 @@ class ProductVariantService {
 
     // Sync product metrics after deleting variant
     await productService.syncProductMetrics(variant.productId.toString());
+    productService.sendProductWebhookAsync(variant.productId.toString());
+
 
     return { message: 'Variant deleted successfully' };
   }

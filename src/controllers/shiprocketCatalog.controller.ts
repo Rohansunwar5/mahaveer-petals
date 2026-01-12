@@ -2,8 +2,19 @@ import { NextFunction, Request, Response } from 'express';
 import shiprocketCatalogService from '../services/shiprocketCatalog.service';
 
 export const fetchProducts = async (req: Request, res: Response, next: NextFunction) => {
-  const { page, limit } = req.query;
+  const { page, limit, collection_id } = req.query;
 
+  // ✅ If collection_id is provided, fetch products by collection
+  if (collection_id) {
+    const response = await shiprocketCatalogService.fetchProductsByCollection(
+      collection_id as string,
+      page ? parseInt(page as string) : 1,
+      limit ? parseInt(limit as string) : 100
+    );
+    return next(response);
+  }
+
+  // Otherwise, fetch all products
   const response = await shiprocketCatalogService.fetchProducts(
     page ? parseInt(page as string) : 1,
     limit ? parseInt(limit as string) : 100

@@ -12,38 +12,17 @@ import {
 import isLoggedIn from '../middlewares/isLoggedIn.middleware';
 import { addToCartValidator, updateCartValidator } from '../middlewares/validators/cart.validators';
 import { optionalAuth } from '../middlewares/optionalAuth.middleware';
+import { generateCheckoutToken } from '../controllers/shipment.controller';
 
 const cartRouter = Router();
 
-// Get cart (works for both authenticated and guest users)
 cartRouter.get('/', optionalAuth, asyncHandler(getCart));
-
-// Add item to cart
-cartRouter.post(
-  '/add',
-  optionalAuth,
-  addToCartValidator,
-  asyncHandler(addToCart)
-);
-
-// Update cart item quantity
-cartRouter.patch(
-  '/update',
-  optionalAuth,
-  updateCartValidator,
-  asyncHandler(updateCartItem)
-);
-
-// Remove item from cart
-cartRouter.delete(
-  '/remove/:variantId',
-  optionalAuth,
-  asyncHandler(removeCartItem)
-);
-
-// Clear entire cart
+cartRouter.post('/add', optionalAuth, addToCartValidator,asyncHandler(addToCart));
+cartRouter.patch('/update', optionalAuth, updateCartValidator, asyncHandler(updateCartItem));
+cartRouter.delete('/remove/:variantId', optionalAuth, asyncHandler(removeCartItem));
 cartRouter.delete('/clear', optionalAuth, asyncHandler(clearCart));
 cartRouter.get('/checkout-data', optionalAuth, asyncHandler(getCartForCheckout));
+cartRouter.post( '/checkout/token', optionalAuth, asyncHandler(generateCheckoutToken));
 cartRouter.post('/merge', isLoggedIn, asyncHandler(mergeGuestCart));
 
 export default cartRouter;

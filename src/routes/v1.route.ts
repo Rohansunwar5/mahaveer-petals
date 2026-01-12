@@ -30,7 +30,7 @@ v1Router.use('/cart', cartRouter);
 v1Router.use('/order', orderRouter);
 v1Router.use('/category', categoryRouter);
 v1Router.use('/sub-category', subcategoryRouter);
-v1Router.use('/api/shiprocket/catalog', shiprocketCatalogRouter);
+v1Router.use('/shiprocket', shiprocketCatalogRouter);
 // v1Router.use('/discount', discountRouter);
 // v1Router.use('/wishlist', wishlistRouter);
 v1Router.use('/blog', blogRouter);

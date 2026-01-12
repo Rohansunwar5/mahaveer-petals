@@ -63,25 +63,19 @@ class CategoryService {
     if (!category) {
       throw new NotFoundError('Category not found');
     }
+    this.syncWithShiprocket(category._id.toString());
 
     return { message: 'Category deleted successfully' };
   }
 
   private async syncWithShiprocket(categoryId: string) {
     try {
-      const category = await this._categoryRepository.getCategoryById(categoryId);
-      if (category) {
-        await shiprocketWebhookService.sendCollectionUpdateWebhook(categoryId, {
-          title: category.name,
-          body_html: category.description || '',
-          image: category.image || '',
-        });
-        console.log(`Category ${categoryId} synced with Shiprocket`);
-      }
+      await shiprocketWebhookService.sendCollectionUpdateWebhook(categoryId);
     } catch (error) {
       console.error(`Failed to sync category ${categoryId} with Shiprocket:`, error);
     }
   }
+
 }
 
 export default new CategoryService(new CategoryRepository());

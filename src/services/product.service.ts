@@ -34,7 +34,23 @@ class ProductService {
       throw new InternalServerError('Failed to create product');
     }
 
+    this.sendProductWebhookAsync(product._id.toString());
+
     return product;
+  }
+
+  async sendProductWebhookAsync(productId: string) {
+    try {
+      await shiprocketWebhookService.sendProductUpdateWebhook(productId);
+    } catch (error) {
+      console.error('[Product Service] Failed to send webhook to Shiprocket:', {
+        productId,
+        error: error instanceof Error ? error.message : error,
+      });
+      
+      // TODO: Implement retry queue or dead letter queue
+      // Consider using a job queue like Bull or BullMQ for reliability
+    }
   }
 
   async getProductById(id: string) {
@@ -59,15 +75,14 @@ class ProductService {
 
   async updateProduct(params: IUpdateProductParams) {
     const product = await this._productRepository.updateProduct(params);
+    
     if (!product) {
       throw new NotFoundError('Product not found');
     }
 
-    try {
-      await shiprocketWebhookService.sendProductUpdateWebhook(product._id.toString());
-    } catch (error) {
-      console.error('Failed to send webhook to Shiprocket:', error);
-    }
+    // ✅ Send webhook to Shiprocket asynchronously
+    // Don't await - let it run in background
+    this.sendProductWebhookAsync(product._id.toString());
 
     return product;
   }

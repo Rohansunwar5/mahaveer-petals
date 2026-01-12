@@ -9,38 +9,31 @@ const orderItemSchema = new mongoose.Schema(
     shiprocketVariantId: {
       type: String,
     },
-
     productName: {
       type: String,
       required: true,
     },
-
     sku: {
       type: String,
       required: true,
     },
-
     attributes: {
       size: String,
       colorName: String,
       colorHex: String,
     },
-
     image: {
       type: String,
     },
-
     quantity: {
       type: Number,
       required: true,
       min: 1,
     },
-
     price: {
       type: Number,
       required: true,
     },
-
     subtotal: {
       type: Number,
       required: true,
@@ -69,41 +62,37 @@ const orderSchema = new mongoose.Schema(
     userId: {
       type: mongoose.Types.ObjectId,
     },
-
     sessionId: {
       type: String,
     },
-
     shiprocketOrderId: {
       type: String,
       required: true,
       unique: true,
       index: true,
     },
-
     orderNumber: {
       type: String,
       required: true,
       unique: true,
       index: true,
     },
-
     items: [orderItemSchema],
-
     shippingAddress: shippingAddressSchema,
+    
+    // ✅ Added billing address (Shiprocket provides this)
+    billingAddress: shippingAddressSchema,
 
     paymentType: {
       type: String,
-      enum: ['CASH_ON_DELIVERY', 'PREPAID', 'UPI', 'CARD', 'WALLET'],
+      enum: ['PREPAID', 'UPI', 'CARD', 'WALLET'], // ✅ Removed COD options
       required: true,
     },
-
     paymentStatus: {
       type: String,
       enum: ['PENDING', 'PAID', 'FAILED', 'REFUNDED'],
       default: 'PENDING',
     },
-
     orderStatus: {
       type: String,
       enum: [
@@ -118,13 +107,17 @@ const orderSchema = new mongoose.Schema(
       ],
       default: 'PENDING',
     },
-
     pricing: {
       subtotal: {
         type: Number,
         required: true,
       },
       discount: {
+        type: Number,
+        default: 0,
+      },
+      // ✅ Added prepaid discount field
+      prepaidDiscount: {
         type: Number,
         default: 0,
       },
@@ -141,37 +134,47 @@ const orderSchema = new mongoose.Schema(
         required: true,
       },
     },
-
     appliedCoupon: {
       code: String,
       discountAmount: Number,
     },
-
     appliedVoucher: {
       code: String,
       discountAmount: Number,
+    },
+    
+    // ✅ Added Shiprocket specific fields
+    shippingPlan: {
+      type: String, // e.g., "Express", "Standard"
+    },
+    rtoPrediction: {
+      type: String, // e.g., "low", "medium", "high"
+    },
+    estimatedDeliveryDate: {
+      type: Date,
+    },
+    shiprocketCartId: {
+      type: String,
+    },
+    shiprocketFastrrOrderId: {
+      type: String,
     },
 
     trackingNumber: {
       type: String,
     },
-
     shiprocketShipmentId: {
       type: String,
     },
-
     notes: {
       type: String,
     },
-
     cancellationReason: {
       type: String,
     },
-
     cancelledAt: {
       type: Date,
     },
-
     deliveredAt: {
       type: Date,
     },
@@ -215,12 +218,24 @@ export interface IOrder {
     pinCode?: string;
     country?: string;
   };
+  billingAddress?: {
+    name?: string;
+    phone?: string;
+    email?: string;
+    addressLine1?: string;
+    addressLine2?: string;
+    city?: string;
+    state?: string;
+    pinCode?: string;
+    country?: string;
+  };
   paymentType: string;
   paymentStatus: string;
   orderStatus: string;
   pricing: {
     subtotal: number;
     discount: number;
+    prepaidDiscount: number;
     shippingCharges: number;
     tax: number;
     total: number;
@@ -233,6 +248,11 @@ export interface IOrder {
     code: string;
     discountAmount: number;
   };
+  shippingPlan?: string;
+  rtoPrediction?: string;
+  estimatedDeliveryDate?: Date;
+  shiprocketCartId?: string;
+  shiprocketFastrrOrderId?: string;
   trackingNumber?: string;
   shiprocketShipmentId?: string;
   notes?: string;

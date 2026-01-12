@@ -9,6 +9,13 @@ const categorySchema = new mongoose.Schema(
       trim: true,
       maxLength: 100,
     },
+    handle: {
+      type: String,
+      required: true,
+      unique: true,
+      lowercase: true,
+      trim: true,
+    },
     
     description: {
       type: String,
@@ -20,11 +27,11 @@ const categorySchema = new mongoose.Schema(
       type: String,
       trim: true,
     },
-    
-    // Shiprocket Collection ID - stored after syncing with Shiprocket
     shiprocketCollectionId: {
       type: String,
       index: true,
+      unique: true,
+      sparse: true,
     },
     
     hsn: {
@@ -40,13 +47,14 @@ const categorySchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-// Indexes for search and filtering
 categorySchema.index({ name: 'text', description: 'text' });
 categorySchema.index({ isActive: 1 });
+categorySchema.index({ handle: 1 });
 
 export interface ICategory {
   _id: string;
   name: string;
+  handle: string;
   description?: string;
   image?: string;
   shiprocketCollectionId?: string;
