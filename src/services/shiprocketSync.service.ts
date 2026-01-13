@@ -13,9 +13,9 @@ class ShiprocketSyncService {
     // 3. Map SKUs → shiprocketVariantId
     for (const product of shiprocketProducts) {
       for (const variant of product.variants) {
-        await productVariantModel.updateOne(
+          await productVariantModel.updateOne(
           { sku: variant.sku },
-          { shiprocketVariantId: variant.id }
+          { $setOnInsert: { shiprocketVariantId: variant.id } }
         );
       }
     }
