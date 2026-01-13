@@ -1,34 +1,30 @@
-// import { Router } from "express";
-// import { asyncHandler } from "../utils/asynchandler";
-// import isLoggedIn from "../middlewares/isLoggedIn.middleware";
-// import { 
-//     addItemToWishlist, 
-//     checkItemInWishlist, 
-//     clearWishlist, 
-//     createWishlist, 
-//     getWishlist, 
-//     getWishlistItemCount, 
-//     removeItemFromWishlist, 
-//     toggleWishlistItem, 
-//     updateItemPrice, 
-//     updateWishlist,
-//     moveItemToCart,
-//     getPublicWishlists
-// } from "../controllers/wishlist.controller";
+// wishlist.route.ts
+import { Router } from 'express';
+import { asyncHandler } from '../utils/asynchandler';
+import {
+  getWishlist,
+  addToWishlist,
+  removeFromWishlist,
+  clearWishlist,
+  checkItemInWishlist,
+  getWishlistItemCount,
+  deleteWishlist,
+  mergeGuestWishlist,
+  moveToCart,
+} from '../controllers/wishlist.controller';
+import isLoggedIn from '../middlewares/isLoggedIn.middleware';
 
-// const wishlistRouter = Router();
+const wishlistRouter = Router();
 
-// wishlistRouter.post('/create', isLoggedIn, asyncHandler(createWishlist));
-// wishlistRouter.get('/', isLoggedIn, asyncHandler(getWishlist));
-// wishlistRouter.get('/count', isLoggedIn, asyncHandler(getWishlistItemCount));
-// wishlistRouter.get('/public', asyncHandler(getPublicWishlists));
-// wishlistRouter.post('/add', isLoggedIn, asyncHandler(addItemToWishlist));
-// wishlistRouter.delete('/remove/:productId', isLoggedIn, asyncHandler(removeItemFromWishlist));
-// wishlistRouter.put('/update', isLoggedIn, asyncHandler(updateWishlist));
-// wishlistRouter.delete('/clear', isLoggedIn, asyncHandler(clearWishlist));
-// wishlistRouter.get('/check/:productId', isLoggedIn, asyncHandler(checkItemInWishlist));
-// wishlistRouter.post('/toggle', isLoggedIn, asyncHandler(toggleWishlistItem));
-// wishlistRouter.put('/update-price/:productId', isLoggedIn, asyncHandler(updateItemPrice));
-// wishlistRouter.post('/move-to-cart/:productId', isLoggedIn, asyncHandler(moveItemToCart));
+wishlistRouter.get('/', asyncHandler(getWishlist));
+wishlistRouter.post('/add', asyncHandler(addToWishlist));
+wishlistRouter.post('/remove', asyncHandler(removeFromWishlist));
+wishlistRouter.post('/move-to-cart', asyncHandler(moveToCart));
+wishlistRouter.delete('/clear', asyncHandler(clearWishlist));
+wishlistRouter.get('/check', asyncHandler(checkItemInWishlist));
+wishlistRouter.get('/count', asyncHandler(getWishlistItemCount));
+wishlistRouter.delete('/', asyncHandler(deleteWishlist));
 
-// export default wishlistRouter;
+wishlistRouter.post('/merge', isLoggedIn, asyncHandler(mergeGuestWishlist));
+
+export default wishlistRouter;

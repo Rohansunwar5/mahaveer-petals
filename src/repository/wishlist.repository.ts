@@ -1,147 +1,152 @@
-import wishlistModel, { IWishlist, IWishlistItem } from "../models/wishlist.model";
+import wishlistModel, { IWishlist } from '../models/wishlist.model';
+import mongoose from 'mongoose';
 
-export interface CreateWishlistParams {
-    user: string;
-    name?: string;
-    isPublic?: boolean;
+export interface ICreateWishlistParams {
+  userId?: string;
+  sessionId?: string;
+  items?: {
+    productId: mongoose.Types.ObjectId;
+    variantId?: mongoose.Types.ObjectId;
+    addedAt: Date;
+  }[];
 }
 
-export interface AddWishlistItemParams {
-    userId: string;
-    productId: string;
-    priceWhenAdded?: number;
+export interface IAddToWishlistParams {
+  userId?: string;
+  sessionId?: string;
+  productId: string;
+  variantId?: string;
 }
 
-export interface updateWishlistParams {
-    name?: string;
-    isPublic?: boolean;
+export interface IRemoveFromWishlistParams {
+  userId?: string;
+  sessionId?: string;
+  productId: string;
+  variantId?: string;
 }
 
 export class WishlistRepository {
-    private _model = wishlistModel;
+  private _model = wishlistModel;
 
-    async createWishlist(params: CreateWishlistParams) {
-        return this._model.create({
-            user: params.user,
-            name: params.name || 'My wishlist',
-            isPublic: params.isPublic || false,
-            items: []
+  async getWishlistByUserId(userId: string): Promise<IWishlist | null> {
+    return this._model.findOne({
+      userId: new mongoose.Types.ObjectId(userId),
+      isActive: true,
+    });
+  }
+
+  async getWishlistBySessionId(sessionId: string): Promise<IWishlist | null> {
+    return this._model.findOne({
+      sessionId,
+      isActive: true,
+    });
+  }
+
+  async createWishlist(params: ICreateWishlistParams): Promise<IWishlist> {
+    const { userId, sessionId, items = [] } = params;
+
+    return this._model.create({
+      userId: userId ? new mongoose.Types.ObjectId(userId) : undefined,
+      sessionId,
+      items,
+      isActive: true,
+    });
+  }
+
+  async addItem(wishlistId: string, productId: string, variantId?: string): Promise<IWishlist | null> {
+    return this._model.findByIdAndUpdate(
+      wishlistId,
+      {
+        $push: {
+          items: {
+            productId: new mongoose.Types.ObjectId(productId),
+            variantId: variantId ? new mongoose.Types.ObjectId(variantId) : undefined,
+            addedAt: new Date(),
+          },
+        },
+      },
+      { new: true }
+    );
+  }
+
+  async removeItem(wishlistId: string, productId: string, variantId?: string): Promise<IWishlist | null> {
+    const pullQuery: any = {
+      productId: new mongoose.Types.ObjectId(productId),
+    };
+
+    if (variantId) {
+      pullQuery.variantId = new mongoose.Types.ObjectId(variantId);
+    }
+
+    return this._model.findByIdAndUpdate(
+      wishlistId,
+      { $pull: { items: pullQuery } },
+      { new: true }
+    );
+  }
+
+  async clearWishlist(wishlistId: string): Promise<IWishlist | null> {
+    return this._model.findByIdAndUpdate(
+      wishlistId,
+      { $set: { items: [] } },
+      { new: true }
+    );
+  }
+
+  async checkItemExists(wishlist: IWishlist, productId: string, variantId?: string): Promise<boolean> {
+    return wishlist.items.some(item => {
+      const productMatch = item.productId.toString() === productId;
+      if (!variantId) return productMatch;
+      return productMatch && item.variantId?.toString() === variantId;
+    });
+  }
+
+  async getWishlistItemCount(wishlist: IWishlist): Promise<number> {
+    return wishlist.items.length;
+  }
+
+  async deleteWishlist(wishlistId: string): Promise<IWishlist | null> {
+    return this._model.findByIdAndUpdate(
+      wishlistId,
+      { isActive: false },
+      { new: true }
+    );
+  }
+
+  async mergeWishlists(guestWishlistId: string, userWishlistId: string): Promise<IWishlist | null> {
+    const guestWishlist = await this._model.findById(guestWishlistId);
+    const userWishlist = await this._model.findById(userWishlistId);
+
+    if (!guestWishlist || !userWishlist) return null;
+
+    // Get items from guest wishlist that don't exist in user wishlist
+    const itemsToAdd = guestWishlist.items.filter(guestItem => {
+      return !userWishlist.items.some(userItem => {
+        const productMatch = userItem.productId.toString() === guestItem.productId.toString();
+        if (!guestItem.variantId) return productMatch;
+        return productMatch && userItem.variantId?.toString() === guestItem.variantId?.toString();
+      });
+    });
+
+    // Add unique items to user wishlist
+    if (itemsToAdd.length > 0) {
+      await this._model.findByIdAndUpdate(
+        userWishlistId,
+        { $push: { items: { $each: itemsToAdd } } }
+      );
+    }
+
+    // Deactivate guest wishlist
+    await this._model.findByIdAndUpdate(guestWishlistId, { isActive: false });
+
+    return this._model.findById(userWishlistId);
+  }
+
+    async getWishlistItem(wishlist: IWishlist, productId: string, variantId?: string) {
+        return wishlist.items.find(item => {
+        const productMatch = item.productId.toString() === productId;
+        if (!variantId) return productMatch && !item.variantId;
+        return productMatch && item.variantId?.toString() === variantId;
         });
-    }
-
-    async getWishlistByUserId(userId: string) {
-        return this._model.findOne({ user: userId });
-    }
-
-    async getWishlistById(wishlistId: string) {
-        return this._model.findById(wishlistId);
-    }
-
-    async addItemToWishlist(params: AddWishlistItemParams) {
-        return this._model.findOneAndUpdate(
-            { user: params.userId },
-            {
-                $addToSet: {
-                    items: {
-                        product: params.productId,
-                        priceWhenAdded: params.priceWhenAdded,
-                        addedAt: new Date()
-                    }
-                }
-            },
-            {
-                new: true,
-                upsert: true
-            }
-        );
-    }
-
-
-    async removeItemFromWishlist(userId: string, productId: string) {
-        return this._model.findOneAndUpdate(
-            { user: userId },
-            { $pull: { items: { product: productId } } },
-            { new: true }
-        )
-    }
-
-    async updateWishlist(userId: string, params: updateWishlistParams) {
-        return this._model.findOneAndUpdate(
-            { user: userId },
-            params,
-            { new: true, runValidators: true }
-        )
-    }
-
-    async clearWishlist(userId: string) {
-        return this._model.findOneAndUpdate(
-            { user: userId },
-            { $set: { items: [] } },
-            { new: true }
-        );
-    }
-
-    async checkItemExists(userId: string, productId: string) {
-        const wishlist = await this._model.findOne({
-            user: userId,
-            "items.product": productId
-        })
-
-        return !!wishlist;
-    }
-
-    async getPublicWishlists(page: number = 1, limit: number = 10) {
-        const skip = (page -1) * limit;
-
-        const wishlists = await this._model.find({ isPublic: true })
-            .skip(skip)
-            .limit(limit)
-            .sort({ updatedAt: -1 });
-        const total = await this._model.countDocuments({ isPublic: true });
-        
-        return {
-            wishlists,
-            total,
-            page,
-            pages: Math.ceil(total / limit)
-        }       
-    }
-
-    async getWishlistItemCount(userId: string): Promise<number> {
-        const wishlist = await this._model.findOne({ user: userId }).select('items');
-        return wishlist ? wishlist.items.length : 0;
-    }
-
-    async updateItemPrice(userId: string, productId: string, newPrice: number): Promise<IWishlist | null> {
-        return this._model.findOneAndUpdate(
-            { 
-                user: userId,
-                "items.product": productId 
-            },
-            { 
-                $set: { 
-                    "items.$.priceWhenAdded": newPrice 
-                } 
-            },
-            { new: true }
-        );
-    }
-
-    async getWishlistWithProducts(userId: string) {
-        return this._model.findOne({ user: userId });
-    }
-
-    async getWishlistItem(userId: string, productId: string): Promise<IWishlistItem | null> {
-        const wishlist = await this._model.findOne({
-            user: userId,
-            "items.product": productId
-        });
-        
-        if (wishlist) {
-            const item = wishlist.items.find(item => item.product.toString() === productId);
-            return item || null;
-        }
-        
-        return null;
     }
 }

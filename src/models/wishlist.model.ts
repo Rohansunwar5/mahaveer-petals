@@ -1,56 +1,72 @@
-import mongoose from 'mongoose';
+// wishlist.model.ts
+import mongoose from "mongoose";
 
 const wishlistItemSchema = new mongoose.Schema(
-    {
-        product: {
-            type: mongoose.Types.ObjectId,
-            required: true,
-        },
-        addedAt: {
-            type: Date,
-            default: Date.now,
-        },
-        priceWhenAdded: {
-            type: Number,
-        }
-    }
-)
+  {
+    productId: {
+      type: mongoose.Types.ObjectId,
+      required: true,
+      index: true,
+    },
 
-const wishlistSchema = new mongoose.Schema (
-    {
-        user: {
-            type: mongoose.Types.ObjectId,
-            required: true,
-        },
-        items: [ wishlistItemSchema ],
-        isPublic: {
-            type: Boolean,
-            default: false,
-        },
-        name: {
-            type: String,
-            default: "My Wishlist",
-        },
-    }, { timestamps: true }
-)
+    variantId: {
+      type: mongoose.Types.ObjectId,
+    },
 
-wishlistSchema.index({ user: 1 }, { unique: true });
+    addedAt: {
+      type: Date,
+      default: Date.now,
+    },
+  },
+  { _id: false }
+);
 
-export interface IWishlistItem {
-    _id: string;
-    product: mongoose.Types.ObjectId;
+const wishlistSchema = new mongoose.Schema(
+  {
+    userId: {
+      type: mongoose.Types.ObjectId,
+      index: true,
+    },
+
+    sessionId: {
+      type: String,
+      index: true,
+    },
+
+    items: [wishlistItemSchema],
+
+    isActive: {
+      type: Boolean,
+      default: true,
+    },
+  },
+  { timestamps: true }
+);
+
+wishlistSchema.index({ userId: 1, isActive: 1 }, { 
+  unique: true, 
+  partialFilterExpression: { userId: { $exists: true }, isActive: true } 
+});
+
+wishlistSchema.index({ sessionId: 1, isActive: 1 }, { 
+  unique: true, 
+  partialFilterExpression: { sessionId: { $exists: true }, isActive: true } 
+});
+
+wishlistSchema.index({ "items.productId": 1 });
+
+export interface IWishlist {
+  _id: string;
+  userId?: mongoose.Types.ObjectId;
+  sessionId?: string;
+  items: {
+    productId: mongoose.Types.ObjectId;
+    variantId?: mongoose.Types.ObjectId;
     addedAt: Date;
-    priceWhenAdded?: number;
+  }[];
+  isActive: boolean;
+  createdAt?: Date;
+  updatedAt?: Date;
 }
 
-export interface IWishlist extends mongoose.Schema {
-    _id: string;
-    user: mongoose.Types.ObjectId;
-    items: IWishlistItem[];
-    isPublic: boolean;
-    name: string;
-    createdAt: Date;
-    updatedAt: Date;
-}
-
-export default mongoose.model<IWishlist>('Wishlist', wishlistSchema);
+export default mongoose.model<IWishlist>("Wishlist", wishlistSchema);

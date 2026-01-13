@@ -10,13 +10,13 @@ import cartRouter from './cart.route';
 import categoryRouter from './category.route';
 import adminRouter from './admin.route';
 import subcategoryRouter from './subcategory.route';
-// import wishlistRouter from './wishlist.route';
 import blogRouter from './blog.route';
 import bannerRouter from './banner.route';
 import mobileBannerRouter from './mobileBanner.route';
 import shiprocketCatalogRouter from './shiprocketCatalog.route';
 import webhookRouter from './webhook.routes';
 import productVariantRouter from './productVariant.route';
+import wishlistRouter from './wishlist.route';
 
 const v1Router = Router();
 
@@ -32,7 +32,7 @@ v1Router.use('/category', categoryRouter);
 v1Router.use('/sub-category', subcategoryRouter);
 v1Router.use('/shiprocket', shiprocketCatalogRouter);
 // v1Router.use('/discount', discountRouter);
-// v1Router.use('/wishlist', wishlistRouter);
+v1Router.use('/wishlist', wishlistRouter);
 v1Router.use('/blog', blogRouter);
 v1Router.use('/banner', bannerRouter);
 v1Router.use('/mobile-banner', mobileBannerRouter);
