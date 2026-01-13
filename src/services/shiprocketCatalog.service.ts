@@ -183,17 +183,27 @@ class ShiprocketCatalogService {
       1000
     );
 
-    const validVariants = variants.filter(
-      v => v.isActive && !!v.shiprocketVariantId
-    );
+    const activeVariants = variants.filter(v => v.isActive);
 
-    if (validVariants.length === 0) {
+    if (activeVariants.length === 0) {
+      if (strictMode) {
+        throw new Error('Product has no active variants');
+      }
+      return null;
+    }
+
+    // ⚠️ ONLY enforce shiprocketVariantId in strict mode
+    const usableVariants = strictMode
+      ? activeVariants.filter(v => !!v.shiprocketVariantId)
+      : activeVariants;
+
+    if (usableVariants.length === 0) {
       if (strictMode) {
         throw new Error(
-          `All active variants must be synced with Shiprocket before webhook update`
+          'All active variants must be synced with Shiprocket before webhook update'
         );
       }
-      return null; // Skip this product in catalog sync
+      return null;
     }
 
     const category = await this._categoryRepository.getCategoryById(
@@ -201,24 +211,25 @@ class ShiprocketCatalogService {
     );
 
     const productDoc = product as IProduct & { createdAt?: Date; updatedAt?: Date };
-    const firstVariant = validVariants[0];
+    const firstVariant = usableVariants[0];
 
     return {
       id: product._id.toString(),
       title: product.name,
       body_html: product.description || '',
-      vendor: 'Daadis', // ✅ Your store name
+      vendor: 'Daadis',
       product_type: category?.name || '',
-      handle: product.slug, // ✅ ADDED: Required field
-      created_at: productDoc.createdAt?.toISOString() || new Date().toISOString(), // ✅ ADDED: Required field
+      handle: product.slug,
+      created_at: productDoc.createdAt?.toISOString() || new Date().toISOString(),
       updated_at: productDoc.updatedAt?.toISOString() || new Date().toISOString(),
       status: product.isActive ? 'active' : 'inactive',
-      variants: validVariants.map(variant => this.formatVariant(variant)),
+      variants: usableVariants.map(v => this.formatVariant(v)),
       image: {
         src: firstVariant.image,
       },
     };
   }
+
 
   /**
    * Private helper to format a single variant

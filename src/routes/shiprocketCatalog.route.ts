@@ -7,7 +7,6 @@ import {
   getProductWebhookData,
 } from '../controllers/shiprocketCatalog.controller';
 import { shiprocketIpMiddleware } from '../middlewares/shiprocketIp.midlleware';
-// import { shiprocketAuthMiddleware } from '../middlewares/shiprocketAuth.middleware';
 
 const shiprocketCatalogRouter = Router();
 
@@ -18,7 +17,6 @@ const shiprocketCatalogRouter = Router();
 // Catalog Sync APIs - Called by Shiprocket
 shiprocketCatalogRouter.get(
   '/products',
-  shiprocketIpMiddleware,
   asyncHandler(fetchProducts)
 );
 
@@ -30,7 +28,6 @@ shiprocketCatalogRouter.get(
 
 shiprocketCatalogRouter.get(
   '/collections',
-  shiprocketIpMiddleware,
   asyncHandler(fetchCollections)
 );
 

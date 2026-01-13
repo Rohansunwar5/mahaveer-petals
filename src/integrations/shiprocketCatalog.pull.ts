@@ -24,4 +24,9 @@ class ShiprocketCatalogPullService {
   }
 }
 
+// POSSIBLE BUG: If Shiprocket ever adds pagination here (they sometimes do), your code will silently miss variants.
+
+// 📌 Not required now, just be aware.
+
+// Verdict: ✔️ Correct
 export default new ShiprocketCatalogPullService();

@@ -1,7 +1,6 @@
 import { OrderRepository } from '../repository/order.repository';
 import { CartRepository } from '../repository/cart.repository';
 import { NotFoundError } from '../errors/not-found.error';
-import { BadRequestError } from '../errors/bad-request.error';
 import productVariantModel from '../models/productVariant.model';
 import productModel from '../models/product.model';
 import mongoose from 'mongoose';
@@ -28,33 +27,27 @@ class OrderService {
       coupon_codes,
       coupon_discount,
       prepaid_discount,
-      total_discount,
       subtotal_price,
       shipping_charges,
       shipping_plan,
       rto_prediction,
-      edd, // Estimated delivery date
+      edd,
       cart_id,
       fastrr_order_id,
-      discount_detail,
     } = webhookData;
 
-    // ✅ Validate order status
+    // ✅ Only process successful orders
     if (status !== 'SUCCESS') {
-      throw new BadRequestError('Order status is not SUCCESS');
+      return null;
     }
 
-    // ✅ Check for duplicate orders (webhook may be sent multiple times)
-    const existingOrder = await this._orderRepository.getOrderByShiprocketId(order_id);
-    if (existingOrder) {
-      console.log('[Order Service] Duplicate order webhook ignored:', order_id);
-      return existingOrder;
-    }
+    // ✅ Idempotency
+    const existingOrder =
+      await this._orderRepository.getOrderByShiprocketId(order_id);
+    if (existingOrder) return existingOrder;
 
-    // ✅ Generate order number
     const orderNumber = await this.generateOrderNumber();
 
-    // ✅ Map cart items to order items
     const orderItems = await Promise.all(
       cart_data.items.map(async (item: any) => {
         const variant = await productVariantModel.findOne({
@@ -88,7 +81,6 @@ class OrderService {
       })
     );
 
-    // ✅ Map payment type (PREPAID only, no COD)
     const paymentTypeMap: Record<string, string> = {
       PREPAID: 'PREPAID',
       UPI: 'UPI',
@@ -96,21 +88,25 @@ class OrderService {
       WALLET: 'WALLET',
     };
 
-    // ✅ Map payment status
+    const normalizedPaymentStatus =
+      typeof payment_status === 'string'
+        ? payment_status.toUpperCase()
+        : 'PENDING';
+
     const paymentStatusMap: Record<string, string> = {
-      Success: 'PAID',
-      Pending: 'PENDING',
-      Failed: 'FAILED',
+      SUCCESS: 'PAID',
+      PENDING: 'PENDING',
+      FAILED: 'FAILED',
     };
 
-    // ✅ Helper function to format address
     const formatAddress = (addr: any, fallbackPhone?: string, fallbackEmail?: string) => {
       if (!addr) return undefined;
-      
+
       return {
-        name: addr.first_name && addr.last_name
-          ? `${addr.first_name} ${addr.last_name}`.trim()
-          : addr.first_name || addr.last_name || '',
+        name:
+          addr.first_name && addr.last_name
+            ? `${addr.first_name} ${addr.last_name}`.trim()
+            : addr.first_name || addr.last_name || '',
         phone: addr.phone || fallbackPhone || '',
         email: addr.email || fallbackEmail || '',
         addressLine1: addr.line1 || '',
@@ -122,85 +118,80 @@ class OrderService {
       };
     };
 
-    // ✅ Calculate pricing
+    const computedSubtotal =
+      subtotal_price ??
+      orderItems.reduce((sum, item) => sum + item.subtotal, 0);
+
     const pricing = {
-      subtotal: subtotal_price || orderItems.reduce((sum, item) => sum + item.subtotal, 0),
+      subtotal: computedSubtotal,
       discount: coupon_discount || 0,
       prepaidDiscount: prepaid_discount || 0,
       shippingCharges: shipping_charges || 0,
       tax: 0,
-      total: total_amount_payable,
+      total: 0,
     };
 
-    // ✅ Parse estimated delivery date
-    let estimatedDeliveryDate: Date | undefined;
-    if (edd) {
-      try {
-        estimatedDeliveryDate = new Date(edd);
-      } catch (error) {
-        console.error('[Order Service] Failed to parse EDD:', edd);
-      }
+    const computedTotal =
+      pricing.subtotal -
+      pricing.discount -
+      pricing.prepaidDiscount +
+      pricing.shippingCharges +
+      pricing.tax;
+
+    pricing.total = total_amount_payable ?? computedTotal;
+
+    if (
+      total_amount_payable &&
+      Math.abs(total_amount_payable - computedTotal) > 1
+    ) {
+      console.warn('[Order Service] Pricing mismatch detected', {
+        order_id,
+        computedTotal,
+        shiprocketTotal: total_amount_payable,
+      });
     }
 
-    // ✅ Create order with all fields
+    const estimatedDeliveryDate = edd ? new Date(edd) : undefined;
+
     const order = await this._orderRepository.createOrder({
       shiprocketOrderId: order_id,
       orderNumber,
       items: orderItems,
-
-      // ✅ Shipping address
       shippingAddress: formatAddress(shipping_address, phone, email),
-
-      // ✅ Billing address
       ...(billing_address && {
         billingAddress: formatAddress(billing_address, phone, email),
       }),
-
-      // ✅ Payment info
       paymentType: paymentTypeMap[payment_type] || 'PREPAID',
-      paymentStatus: paymentStatusMap[payment_status] || 'PENDING',
-
-      // ✅ Pricing
+      paymentStatus: paymentStatusMap[normalizedPaymentStatus] || 'PENDING',
       pricing,
-
-      // ✅ Coupon (take first code if multiple)
-      ...(coupon_codes && coupon_codes.length > 0 && {
+      ...(coupon_codes?.length && {
         appliedCoupon: {
           code: coupon_codes[0],
           discountAmount: coupon_discount || 0,
         },
       }),
-
-      // ✅ Shiprocket specific fields
       ...(shipping_plan && { shippingPlan: shipping_plan }),
       ...(rto_prediction && { rtoPrediction: rto_prediction }),
       ...(estimatedDeliveryDate && { estimatedDeliveryDate }),
       ...(cart_id && { shiprocketCartId: cart_id }),
       ...(fastrr_order_id && { shiprocketFastrrOrderId: fastrr_order_id }),
-
-      // Set initial order status
       orderStatus: 'CONFIRMED',
     });
 
-    // ✅ Update stock
+    // 🔒 Safe stock update
     await this.updateStock(orderItems);
 
-    // ✅ Send confirmation email
+    // 📧 Async email
     const recipientEmail = shipping_address?.email || email;
     if (recipientEmail) {
-      await this.sendOrderConfirmationEmail(order);
+      this.sendOrderConfirmationEmail(order).catch(err =>
+        console.error('[Order Service] Email async failure:', err)
+      );
     }
-
-    console.log('[Order Service] Order created successfully:', {
-      orderId: order._id,
-      orderNumber: order.orderNumber,
-      shiprocketOrderId: order_id,
-      paymentType: order.paymentType,
-      total: order.pricing.total,
-    });
 
     return order;
   }
+
 
   async getOrderById(orderId: string) {
     const order = await this._orderRepository.getOrderById(orderId);
@@ -281,18 +272,34 @@ class OrderService {
   }
 
   private async updateStock(items: any[]) {
-    // Optimize with bulkWrite
-    const bulkOps = items.map((item) => ({
-      updateOne: {
-        filter: { _id: item.variantId },
-        update: { $inc: { stock: -item.quantity } },
-      },
-    }));
+    const session = await mongoose.startSession();
+    session.startTransaction();
 
-    if (bulkOps.length > 0) {
-      await productVariantModel.bulkWrite(bulkOps);
+    try {
+      for (const item of items) {
+        const res = await productVariantModel.updateOne(
+          {
+            _id: item.variantId,
+            stock: { $gte: item.quantity },
+          },
+          { $inc: { stock: -item.quantity } },
+          { session }
+        );
+
+        if (res.matchedCount === 0) {
+          throw new Error(`Insufficient stock for variant ${item.variantId}`);
+        }
+      }
+
+      await session.commitTransaction();
+    } catch (err) {
+      await session.abortTransaction();
+      throw err;
+    } finally {
+      session.endSession();
     }
   }
+
 
   private async sendOrderConfirmationEmail(order: any) {
     try {
