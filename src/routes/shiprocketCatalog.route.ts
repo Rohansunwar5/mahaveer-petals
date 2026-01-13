@@ -34,7 +34,6 @@ shiprocketCatalogRouter.get(
   asyncHandler(fetchCollections)
 );
 
-// Internal endpoint to get formatted webhook data
 shiprocketCatalogRouter.get(
   '/webhook-data/:productId',
   asyncHandler(getProductWebhookData)

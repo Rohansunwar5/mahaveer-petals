@@ -27,7 +27,6 @@ orderRouter.patch(
   asyncHandler(updateOrderStatus)
 );
 
-// Update tracking information (admin/internal use)
 orderRouter.patch(
   '/:orderId/tracking',
   isLoggedIn,
