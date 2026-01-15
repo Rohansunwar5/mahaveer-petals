@@ -76,10 +76,8 @@ class ShiprocketCatalogService {
 
     // ✅ CORRECTED: Match Shiprocket's exact response format
     return {
-      data: {
         total: pagination.total,
         products: shiprocketProducts,
-      },
     };
   }
 
@@ -105,10 +103,8 @@ class ShiprocketCatalogService {
 
     // ✅ CORRECTED: Match Shiprocket's exact response format
     return {
-      data: {
         total: pagination.total,
         products: shiprocketProducts,
-      },
     };
   }
 
@@ -141,11 +137,10 @@ class ShiprocketCatalogService {
 
     // ✅ CORRECTED: Match Shiprocket's exact response format
     return {
-      data: {
-        total: pagination.total,
-        collections: shiprocketCollections,
-      },
+      total: pagination.total,
+      collections: shiprocketCollections,
     };
+
   }
 
   /**
@@ -238,7 +233,7 @@ class ShiprocketCatalogService {
     const variantDoc = variant as IProductVariant & { updatedAt?: Date };
 
     return {
-      id: variant.shiprocketVariantId!, // ✅ Guaranteed to exist due to filtering
+      id: variant.shiprocketVariantId || variant._id.toString(), // ✅ Guaranteed to exist due to filtering
       title: this.formatVariantTitle(variant.attributes),
       price: variant.price.toString(),
       quantity: variant.stock,

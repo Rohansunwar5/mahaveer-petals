@@ -17,7 +17,10 @@ export const fetchProducts = async ( req: Request, res: Response, next: NextFunc
   } else {
     response = await shiprocketCatalogService.fetchProducts(page, limit);
   }
-  return next(response);
+
+  res.status(200).json({
+    data: response
+  });
 };
 
 export const fetchProductsByCollection = async (req: Request, res: Response, next: NextFunction) => {
@@ -34,7 +37,7 @@ export const fetchProductsByCollection = async (req: Request, res: Response, nex
     limit ? parseInt(limit as string) : 100
   );
 
-  next(response);
+  res.status(200).json({ data: response });
 };
 
 export const fetchCollections = async (req: Request, res: Response, next: NextFunction) => {
@@ -45,7 +48,7 @@ export const fetchCollections = async (req: Request, res: Response, next: NextFu
     limit ? parseInt(limit as string) : 100
   );
 
-  next(response);
+  res.status(200).json({ data: response });
 };
 
 export const getProductWebhookData = async (req: Request, res: Response, next: NextFunction) => {
@@ -53,5 +56,6 @@ export const getProductWebhookData = async (req: Request, res: Response, next: N
 
   const response = await shiprocketCatalogService.formatProductUpdateWebhook(productId);
 
-  next(response);
+  res.status(200).json({ data: response });
+
 };
